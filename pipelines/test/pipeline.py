@@ -76,7 +76,7 @@ def get_pipeline(
         image_uri=sagemaker.image_uris.retrieve(
             framework="sklearn",
             region=region,
-            version="1.2-1",
+            version="1.0-1",
             instance_type=processing_instance_type,
         ),
         command=["python3"],
