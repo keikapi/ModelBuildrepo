@@ -1,0 +1,129 @@
+"""Feature engineers the abalone dataset."""
+import argparse
+import logging
+import os
+
+import pandas as pd
+from sklearn.model_selection import train_test_split
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+logger.addHandler(logging.StreamHandler())
+
+
+def feature_engineering(df):
+    logger.info("Start feature engineering")
+
+    # ---------- Target ----------
+    logger.info("Processing target column Transported")
+    df["Transported"] = df["Transported"].astype(int)
+
+    # ---------- PassengerId -> GroupSize ----------
+    logger.info("Creating GroupSize from PassengerId")
+    df["GroupId"] = df["PassengerId"].str.split("_").str[0]
+    df["GroupSize"] = df.groupby("GroupId")["PassengerId"].transform("count")
+    df.drop(columns=["PassengerId", "GroupId"], inplace=True)
+
+    # ---------- Name ----------
+    logger.info("Dropping Name column")
+    df.drop(columns=["Name"], inplace=True)
+
+    # ---------- Age -> AgeGroup ----------
+    logger.info("Converting Age to AgeGroup")
+    df["Age"] = df["Age"].fillna(-1)
+
+    def age_to_group(age):
+        if age < 0:
+            return "Unknown"
+        elif age < 20:
+            return "child"
+        elif age < 60:
+            return "adult"
+        else:
+            return "senior"
+
+    df["AgeGroup"] = df["Age"].apply(age_to_group)
+    df.drop(columns=["Age"], inplace=True)
+
+    # ---------- ServiceTotal ----------
+    logger.info("Creating ServiceTotal feature")
+    service_cols = [
+        "RoomService",
+        "FoodCourt",
+        "ShoppingMall",
+        "Spa",
+        "VRDeck",
+    ]
+
+    df[service_cols] = df[service_cols].fillna(0)
+    df["ServiceTotal"] = df[service_cols].sum(axis=1)
+    df.drop(columns=service_cols, inplace=True)
+
+    # ---------- Cabin ----------
+    logger.info("Splitting Cabin into Deck / CabinNum / Side")
+    df[["Deck", "CabinNum", "Side"]] = df["Cabin"].str.split("/", expand=True)
+    df.drop(columns=["Cabin"], inplace=True)
+
+    # ---------- Boolean ----------
+    logger.info("Processing boolean columns")
+    for col in ["CryoSleep", "VIP"]:
+        df[col] = df[col].fillna(False).astype(int)
+
+    # ---------- Categorical ----------
+    logger.info("Processing categorical columns")
+    categorical_cols = [
+        "HomePlanet",
+        "Destination",
+        "Deck",
+        "Side",
+        "AgeGroup",
+    ]
+
+    for col in categorical_cols:
+        df[col] = df[col].fillna("Unknown")
+
+    df = pd.get_dummies(df, columns=categorical_cols, drop_first=False)
+
+    # ---------- Numerical ----------
+    logger.info("Processing numerical columns")
+    df["CabinNum"] = pd.to_numeric(df["CabinNum"], errors="coerce")
+    df["CabinNum"] = df["CabinNum"].fillna(df["CabinNum"].median())
+
+    logger.info("Feature engineering completed")
+    return df
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input-data", type=str, required=True)
+    args = parser.parse_args()
+
+    logger.info(f"Reading input data from {args.input_data}")
+    df = pd.read_csv(args.input_data)
+
+    logger.info("Applying feature engineering")
+    df = feature_engineering(df)
+
+    logger.info("Splitting dataset into train / validation / test")
+    train, temp = train_test_split(
+        df, test_size=0.3, random_state=42, stratify=df["Transported"]
+    )
+    validation, test = train_test_split(
+        temp, test_size=0.5, random_state=42, stratify=temp["Transported"]
+    )
+
+    output_base = "/opt/ml/processing"
+    train_path = os.path.join(output_base, "train", "train.csv")
+    val_path = os.path.join(output_base, "validation", "validation.csv")
+    test_path = os.path.join(output_base, "test", "test.csv")
+
+    logger.info("Saving processed datasets")
+    train.to_csv(train_path, index=False)
+    validation.to_csv(val_path, index=False)
+    test.to_csv(test_path, index=False)
+
+    logger.info("Preprocessing completed successfully")
+
+
+if __name__ == "__main__":
+    main()
