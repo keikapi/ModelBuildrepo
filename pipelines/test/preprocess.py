@@ -2,119 +2,128 @@
 import argparse
 import logging
 import os
-import pathlib
-import requests
-import tempfile
 
-import boto3
-import numpy as np
 import pandas as pd
-
-from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.model_selection import train_test_split
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 logger.addHandler(logging.StreamHandler())
 
 
-# Since we get a headerless CSV file we specify the column names here.
-feature_columns_names = [
-    "sex",
-    "length",
-    "diameter",
-    "height",
-    "whole_weight",
-    "shucked_weight",
-    "viscera_weight",
-    "shell_weight",
-]
-label_column = "rings"
+def feature_engineering(df):
+    logger.info("Start feature engineering")
 
-feature_columns_dtype = {
-    "sex": str,
-    "length": np.float64,
-    "diameter": np.float64,
-    "height": np.float64,
-    "whole_weight": np.float64,
-    "shucked_weight": np.float64,
-    "viscera_weight": np.float64,
-    "shell_weight": np.float64,
-}
-label_column_dtype = {"rings": np.float64}
+    # ---------- Target ----------
+    logger.info("Processing target column Transported")
+    df["Transported"] = df["Transported"].astype(int)
+
+    # ---------- PassengerId -> GroupSize ----------
+    logger.info("Creating GroupSize from PassengerId")
+    df["GroupId"] = df["PassengerId"].str.split("_").str[0]
+    df["GroupSize"] = df.groupby("GroupId")["PassengerId"].transform("count")
+    df.drop(columns=["PassengerId", "GroupId"], inplace=True)
+
+    # ---------- Name ----------
+    logger.info("Dropping Name column")
+    df.drop(columns=["Name"], inplace=True)
+
+    # ---------- Age -> AgeGroup ----------
+    logger.info("Converting Age to AgeGroup")
+    df["Age"] = df["Age"].fillna(-1)
+
+    def age_to_group(age):
+        if age < 0:
+            return "Unknown"
+        elif age < 20:
+            return "child"
+        elif age < 60:
+            return "adult"
+        else:
+            return "senior"
+
+    df["AgeGroup"] = df["Age"].apply(age_to_group)
+    df.drop(columns=["Age"], inplace=True)
+
+    # ---------- ServiceTotal ----------
+    logger.info("Creating ServiceTotal feature")
+    service_cols = [
+        "RoomService",
+        "FoodCourt",
+        "ShoppingMall",
+        "Spa",
+        "VRDeck",
+    ]
+
+    df[service_cols] = df[service_cols].fillna(0)
+    df["ServiceTotal"] = df[service_cols].sum(axis=1)
+    df.drop(columns=service_cols, inplace=True)
+
+    # ---------- Cabin ----------
+    logger.info("Splitting Cabin into Deck / CabinNum / Side")
+    df[["Deck", "CabinNum", "Side"]] = df["Cabin"].str.split("/", expand=True)
+    df.drop(columns=["Cabin"], inplace=True)
+
+    # ---------- Boolean ----------
+    logger.info("Processing boolean columns")
+    for col in ["CryoSleep", "VIP"]:
+        df[col] = df[col].fillna(False).astype(int)
+
+    # ---------- Categorical ----------
+    logger.info("Processing categorical columns")
+    categorical_cols = [
+        "HomePlanet",
+        "Destination",
+        "Deck",
+        "Side",
+        "AgeGroup",
+    ]
+
+    for col in categorical_cols:
+        df[col] = df[col].fillna("Unknown")
+
+    df = pd.get_dummies(df, columns=categorical_cols, drop_first=False)
+
+    # ---------- Numerical ----------
+    logger.info("Processing numerical columns")
+    df["CabinNum"] = pd.to_numeric(df["CabinNum"], errors="coerce")
+    df["CabinNum"] = df["CabinNum"].fillna(df["CabinNum"].median())
+
+    logger.info("Feature engineering completed")
+    return df
 
 
-def merge_two_dicts(x, y):
-    """Merges two dicts, returning a new copy."""
-    z = x.copy()
-    z.update(y)
-    return z
-
-
-if __name__ == "__main__":
-    logger.debug("Starting preprocessing.")
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-data", type=str, required=True)
     args = parser.parse_args()
 
-    base_dir = "/opt/ml/processing"
-    pathlib.Path(f"{base_dir}/data").mkdir(parents=True, exist_ok=True)
-    input_data = args.input_data
-    bucket = input_data.split("/")[2]
-    key = "/".join(input_data.split("/")[3:])
+    logger.info(f"Reading input data from {args.input_data}")
+    df = pd.read_csv(args.input_data)
 
-    logger.info("Downloading data from bucket: %s, key: %s", bucket, key)
-    fn = f"{base_dir}/data/abalone-dataset.csv"
-    s3 = boto3.resource("s3")
-    s3.Bucket(bucket).download_file(key, fn)
+    logger.info("Applying feature engineering")
+    df = feature_engineering(df)
 
-    logger.debug("Reading downloaded data.")
-    df = pd.read_csv(
-        fn,
-        header=None,
-        names=feature_columns_names + [label_column],
-        dtype=merge_two_dicts(feature_columns_dtype, label_column_dtype),
+    logger.info("Splitting dataset into train / validation / test")
+    train, temp = train_test_split(
+        df, test_size=0.3, random_state=42, stratify=df["Transported"]
     )
-    os.unlink(fn)
-
-    logger.debug("Defining transformers.")
-    numeric_features = list(feature_columns_names)
-    numeric_features.remove("sex")
-    numeric_transformer = Pipeline(
-        steps=[("imputer", SimpleImputer(strategy="median")), ("scaler", StandardScaler())]
+    validation, test = train_test_split(
+        temp, test_size=0.5, random_state=42, stratify=temp["Transported"]
     )
 
-    categorical_features = ["sex"]
-    categorical_transformer = Pipeline(
-        steps=[
-            ("imputer", SimpleImputer(strategy="constant", fill_value="missing")),
-            ("onehot", OneHotEncoder(handle_unknown="ignore")),
-        ]
-    )
+    output_base = "/opt/ml/processing"
+    train_path = os.path.join(output_base, "train", "train.csv")
+    val_path = os.path.join(output_base, "validation", "validation.csv")
+    test_path = os.path.join(output_base, "test", "test.csv")
 
-    preprocess = ColumnTransformer(
-        transformers=[
-            ("num", numeric_transformer, numeric_features),
-            ("cat", categorical_transformer, categorical_features),
-        ]
-    )
+    logger.info("Saving processed datasets")
+    train.to_csv(train_path, index=False)
+    validation.to_csv(val_path, index=False)
+    test.to_csv(test_path, index=False)
 
-    logger.info("Applying transforms.")
-    y = df.pop("rings")
-    X_pre = preprocess.fit_transform(df)
-    y_pre = y.to_numpy().reshape(len(y), 1)
+    logger.info("Preprocessing completed successfully")
 
-    X = np.concatenate((y_pre, X_pre), axis=1)
 
-    logger.info("Splitting %d rows of data into train, validation, test datasets.", len(X))
-    np.random.shuffle(X)
-    train, validation, test = np.split(X, [int(0.7 * len(X)), int(0.85 * len(X))])
-
-    logger.info("Writing out datasets to %s.", base_dir)
-    pd.DataFrame(train).to_csv(f"{base_dir}/train/train.csv", header=False, index=False)
-    pd.DataFrame(validation).to_csv(
-        f"{base_dir}/validation/validation.csv", header=False, index=False
-    )
-    pd.DataFrame(test).to_csv(f"{base_dir}/test/test.csv", header=False, index=False)
+if __name__ == "__main__":
+    main()

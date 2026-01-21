@@ -1,59 +1,104 @@
-"""Evaluation script for measuring mean squared error."""
+import argparse
 import json
 import logging
-import pathlib
-import pickle
-import tarfile
-
-import numpy as np
+import os
 import pandas as pd
-import xgboost
+import joblib
+from sklearn.metrics import accuracy_score
 
-from sklearn.metrics import mean_squared_error
-
-logger = logging.getLogger()
+logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 logger.addHandler(logging.StreamHandler())
 
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--model-path",
+        type=str,
+        default="/opt/ml/processing/model",
+    )
+    parser.add_argument(
+        "--test-path",
+        type=str,
+        default="/opt/ml/processing/test",
+    )
+    parser.add_argument(
+        "--output-path",
+        type=str,
+        default="/opt/ml/processing/evaluation",
+    )
+    return parser.parse_args()
 
-if __name__ == "__main__":
-    logger.debug("Starting evaluation.")
-    model_path = "/opt/ml/processing/model/model.tar.gz"
-    with tarfile.open(model_path) as tar:
-        tar.extractall(path=".")
 
-    logger.debug("Loading xgboost model.")
-    model = pickle.load(open("xgboost-model", "rb"))
+def main():
+    args = parse_args()
 
-    logger.debug("Reading test data.")
-    test_path = "/opt/ml/processing/test/test.csv"
-    df = pd.read_csv(test_path, header=None)
+    logger.info("===== Evaluation step started =====")
+    logger.info(f"Model path: {args.model_path}")
+    logger.info(f"Test data path: {args.test_path}")
 
-    logger.debug("Reading test data.")
-    y_test = df.iloc[:, 0].to_numpy()
-    df.drop(df.columns[0], axis=1, inplace=True)
-    X_test = xgboost.DMatrix(df.values)
+    # --------------------
+    # Load model
+    # --------------------
+    model_file = os.path.join(args.model_path, "model.joblib")
+    if not os.path.exists(model_file):
+        raise FileNotFoundError(f"Model file not found: {model_file}")
 
-    logger.info("Performing predictions against test data.")
-    predictions = model.predict(X_test)
+    model = joblib.load(model_file)
+    logger.info("Model loaded successfully")
 
-    logger.debug("Calculating mean squared error.")
-    mse = mean_squared_error(y_test, predictions)
-    std = np.std(y_test - predictions)
-    report_dict = {
-        "regression_metrics": {
-            "mse": {
-                "value": mse,
-                "standard_deviation": std
-            },
-        },
+    # --------------------
+    # Load test data
+    # --------------------
+    test_file = os.path.join(args.test_path, "test.csv")
+    if not os.path.exists(test_file):
+        raise FileNotFoundError(f"Test file not found: {test_file}")
+
+    df_test = pd.read_csv(test_file)
+    logger.info(f"Test data shape: {df_test.shape}")
+
+    if "Transported" not in df_test.columns:
+        raise ValueError("Target column 'Transported' not found in test data")
+
+    X_test = df_test.drop(columns=["Transported"])
+    y_true = df_test["Transported"]
+
+    # --------------------
+    # Prediction
+    # --------------------
+    y_pred = model.predict(X_test)
+
+    # LightGBM の predict は確率を返す場合がある
+    if y_pred.dtype != int and y_pred.max() <= 1.0:
+        y_pred = (y_pred >= 0.5).astype(int)
+
+    # --------------------
+    # Accuracy
+    # --------------------
+    accuracy = accuracy_score(y_true, y_pred)
+    logger.info(f"Accuracy: {accuracy}")
+
+    # --------------------
+    # Save evaluation result
+    # --------------------
+    os.makedirs(args.output_path, exist_ok=True)
+
+    evaluation_result = {
+        "classification_metrics": {
+            "accuracy": {
+                "value": accuracy
+            }
+        }
     }
 
-    output_dir = "/opt/ml/processing/evaluation"
-    pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
+    output_file = os.path.join(args.output_path, "evaluation.json")
+    with open(output_file, "w") as f:
+        json.dump(evaluation_result, f, indent=4)
 
-    logger.info("Writing out evaluation report with mse: %f", mse)
-    evaluation_path = f"{output_dir}/evaluation.json"
-    with open(evaluation_path, "w") as f:
-        f.write(json.dumps(report_dict))
+    logger.info(f"Evaluation result saved to {output_file}")
+    logger.info("===== Evaluation step completed =====")
+
+
+if __name__ == "__main__":
+    main()
