@@ -94,12 +94,14 @@ def feature_engineering(df):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--input-data", type=str, required=True)
-    args = parser.parse_args()
-
-    logger.info(f"Reading input data from {args.input_data}")
-    df = pd.read_csv(args.input_data)
+    input_dir = "/opt/ml/processing/input"
+    files = os.listdir(input_dir)
+    if len(files) == 0:
+        raise RuntimeError("No input files found")
+    input_file = os.path.join(input_dir, files[0])
+    df = pd.read_csv(input_file)
+    logger.info(f"Loaded input file: {input_file}")
+    logger.info(f"Input shape: {df.shape}")
 
     logger.info("Applying feature engineering")
     df = feature_engineering(df)
