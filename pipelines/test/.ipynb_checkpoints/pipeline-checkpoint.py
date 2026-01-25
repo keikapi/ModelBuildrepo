@@ -128,8 +128,8 @@ def get_pipeline(
         num_round=600,
         max_depth=5,
         eta=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
+        subsample=0.7,
+        colsample_bytree=0.7,
     )
 
     step_train = TrainingStep(
@@ -199,9 +199,7 @@ def get_pipeline(
 
     model_metrics = ModelMetrics(
         model_statistics=MetricsSource(
-            s3_uri=step_eval.properties.ProcessingOutputConfig.Outputs[
-                "evaluation"
-            ].S3Output.S3Uri,
+            s3_uri=step_eval.arguments["ProcessingOutputConfig"]["Outputs"][0]["S3Output"]["S3Uri"],
             content_type="application/json",
         )
     )
