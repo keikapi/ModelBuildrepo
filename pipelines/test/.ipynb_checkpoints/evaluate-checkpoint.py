@@ -33,11 +33,11 @@ if __name__ == "__main__":
     # Load test data
     # --------------------
     test_path = "/opt/ml/processing/test/test.csv"
-    df = pd.read_csv(test_path)
+    df = pd.read_csv(test_path, header=None)
 
-    y_true = df["Transported"].astype(int)
-    X_test = df.drop(columns=["Transported"])
-
+    y_true = df.iloc[:, 0].astype(int)
+    X_test = df.iloc[:, 1:]
+    
     dtest = xgb.DMatrix(X_test)
 
     # --------------------
