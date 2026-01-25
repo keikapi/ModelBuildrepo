@@ -10,6 +10,11 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 logger.addHandler(logging.StreamHandler())
 
+def to_xgb_csv(df, target_col, path, header=False):
+    y = df[target_col]
+    X = df.drop(columns=[target_col])
+    out = pd.concat([y, X], axis=1)
+    out.to_csv(path, index=False, header=header)
 
 def feature_engineering(df):
     logger.info("Start feature engineering")
@@ -120,9 +125,9 @@ def main():
     test_path = os.path.join(output_base, "test", "test.csv")
 
     logger.info("Saving processed datasets")
-    train.to_csv(train_path, index=False)
-    validation.to_csv(val_path, index=False)
-    test.to_csv(test_path, index=False)
+    to_xgb_csv(df_train, "Transported", "/opt/ml/processing/train/train.csv")
+    to_xgb_csv(df_val, "Transported", "/opt/ml/processing/validation/validation.csv")
+    to_xgb_csv(df_test, "Transported", "/opt/ml/processing/test/test.csv")
 
     logger.info("Preprocessing completed successfully")
 
