@@ -63,7 +63,7 @@ def get_pipeline(
 
     accuracy_threshold = ParameterFloat(
         name="AccuracyThreshold",
-        default_value=0.8,
+        default_value=0.7,
     )
 
     model_approval_status = ParameterString(
@@ -124,10 +124,10 @@ def get_pipeline(
 
     estimator.set_hyperparameters(
         objective="binary:logistic",
-        eval_metric="error",  # = 1 - Accuracy
-        num_round=300,
-        max_depth=6,
-        eta=0.1,
+        eval_metric="logloss",  # = 1 - Accuracy
+        num_round=600,
+        max_depth=5,
+        eta=0.05,
         subsample=0.8,
         colsample_bytree=0.8,
     )
@@ -150,9 +150,10 @@ def get_pipeline(
     # -------- Evaluate --------
     evaluator = ScriptProcessor(
         image_uri=sagemaker.image_uris.retrieve(
-            framework="sklearn",
+            framework="xgboost",
             region=region,
-            version="1.0-1",
+            version="1.5-1",
+            py_version="py3",
             instance_type=processing_instance_type,
         ),
         command=["python3"],
