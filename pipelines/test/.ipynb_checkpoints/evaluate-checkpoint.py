@@ -1,91 +1,82 @@
-import argparse
 import json
 import logging
 import os
+import pathlib
+import pickle
+import tarfile
 
+import numpy as np
 import pandas as pd
+import xgboost
 from sklearn.metrics import accuracy_score
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 logger.addHandler(logging.StreamHandler())
 
 
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--test-path",
-        type=str,
-        default="/opt/ml/processing/test",
-    )
-    parser.add_argument(
-        "--output-path",
-        type=str,
-        default="/opt/ml/processing/evaluation",
-    )
-    return parser.parse_args()
-
-
-def main():
-    args = parse_args()
-
+if __name__ == "__main__":
     logger.info("===== Evaluation step started =====")
-    logger.info(f"Test path: {args.test_path}")
+
+    # --------------------
+    # Load model artifact
+    # --------------------
+    model_tar_path = "/opt/ml/processing/model/model.tar.gz"
+    if not os.path.exists(model_tar_path):
+        raise FileNotFoundError(f"Model archive not found: {model_tar_path}")
+
+    with tarfile.open(model_tar_path) as tar:
+        tar.extractall(path=".")
+
+    logger.info("Loading XGBoost model")
+    model = pickle.load(open("xgboost-model", "rb"))
 
     # --------------------
     # Load test data
     # --------------------
-    test_file = os.path.join(args.test_path, "test.csv")
-    if not os.path.exists(test_file):
-        raise FileNotFoundError(f"Test file not found: {test_file}")
+    test_path = "/opt/ml/processing/test/test.csv"
+    if not os.path.exists(test_path):
+        raise FileNotFoundError(f"Test file not found: {test_path}")
 
-    df_test = pd.read_csv(test_file)
-    logger.info(f"Test data shape: {df_test.shape}")
+    # XGBoost built-in 前提：
+    # 1列目 = label、残り = feature
+    df = pd.read_csv(test_path, header=None)
 
-    if "Transported" not in df_test.columns:
-        raise ValueError("Target column 'Transported' not found in test data")
+    y_true = df.iloc[:, 0].astype(int).to_numpy()
+    X = df.iloc[:, 1:].values
 
-    y_true = df_test["Transported"].astype(int)
-    X_test = df_test.drop(columns=["Transported"])
+    dtest = xgboost.DMatrix(X)
 
     # --------------------
-    # Load prediction result
+    # Prediction
     # --------------------
-    # XGBoost built-in の推論結果を想定
-    # （事前に predict.csv を作っている前提）
-    pred_file = os.path.join(args.test_path, "predictions.csv")
-    if not os.path.exists(pred_file):
-        raise FileNotFoundError(f"Prediction file not found: {pred_file}")
-
-    y_prob = pd.read_csv(pred_file, header=None).iloc[:, 0]
+    logger.info("Running prediction")
+    y_prob = model.predict(dtest)
     y_pred = (y_prob >= 0.5).astype(int)
 
     # --------------------
     # Accuracy
     # --------------------
     accuracy = accuracy_score(y_true, y_pred)
-    logger.info(f"Accuracy: {accuracy}")
+    logger.info("Accuracy: %f", accuracy)
 
     # --------------------
     # Save evaluation result
     # --------------------
-    os.makedirs(args.output_path, exist_ok=True)
+    output_dir = "/opt/ml/processing/evaluation"
+    pathlib.Path(output_dir).mkdir(parents=True, exist_ok=True)
 
-    evaluation_result = {
+    report = {
         "classification_metrics": {
             "accuracy": {
-                "value": float(accuracy)
+                "value": accuracy
             }
         }
     }
 
-    output_file = os.path.join(args.output_path, "evaluation.json")
-    with open(output_file, "w") as f:
-        json.dump(evaluation_result, f, indent=4)
+    evaluation_path = os.path.join(output_dir, "evaluation.json")
+    with open(evaluation_path, "w") as f:
+        json.dump(report, f, indent=4)
 
-    logger.info(f"Evaluation result saved to {output_file}")
+    logger.info("Evaluation report written to %s", evaluation_path)
     logger.info("===== Evaluation step completed =====")
-
-
-if __name__ == "__main__":
-    main()
