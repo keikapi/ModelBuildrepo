@@ -137,10 +137,12 @@ def get_pipeline(
         estimator=estimator,
         inputs={
             "train": TrainingInput(
-                s3_data=step_preprocess.properties.ProcessingOutputConfig.Outputs["train"].S3Output.S3Uri
+                s3_data=step_preprocess.properties.ProcessingOutputConfig.Outputs["train"].S3Output.S3Uri,
+                content_type="text/csv"
             ),
             "validation": TrainingInput(
-                s3_data=step_preprocess.properties.ProcessingOutputConfig.Outputs["validation"].S3Output.S3Uri
+                s3_data=step_preprocess.properties.ProcessingOutputConfig.Outputs["validation"].S3Output.S3Uri,
+                content_type="text/csv"
             ),
         },
     )
