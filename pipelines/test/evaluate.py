@@ -2,8 +2,11 @@ import argparse
 import json
 import logging
 import os
+import tarfile
+
 import pandas as pd
-import joblib
+import numpy as np
+import xgboost as xgb
 from sklearn.metrics import accuracy_score
 
 logger = logging.getLogger(__name__)
@@ -13,21 +16,9 @@ logger.addHandler(logging.StreamHandler())
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--model-path",
-        type=str,
-        default="/opt/ml/processing/model",
-    )
-    parser.add_argument(
-        "--test-path",
-        type=str,
-        default="/opt/ml/processing/test",
-    )
-    parser.add_argument(
-        "--output-path",
-        type=str,
-        default="/opt/ml/processing/evaluation",
-    )
+    parser.add_argument("--model-path", type=str, default="/opt/ml/processing/model")
+    parser.add_argument("--test-path", type=str, default="/opt/ml/processing/test")
+    parser.add_argument("--output-path", type=str, default="/opt/ml/processing/evaluation")
     return parser.parse_args()
 
 
@@ -35,43 +26,37 @@ def main():
     args = parse_args()
 
     logger.info("===== Evaluation step started =====")
-    logger.info(f"Model path: {args.model_path}")
-    logger.info(f"Test data path: {args.test_path}")
 
     # --------------------
-    # Load model
+    # Load model (XGBoost built-in)
     # --------------------
-    model_file = os.path.join(args.model_path, "model.joblib")
-    if not os.path.exists(model_file):
-        raise FileNotFoundError(f"Model file not found: {model_file}")
+    model_tar = os.path.join(args.model_path, "model.tar.gz")
+    if not os.path.exists(model_tar):
+        raise FileNotFoundError(f"Model archive not found: {model_tar}")
 
-    model = joblib.load(model_file)
-    logger.info("Model loaded successfully")
+    with tarfile.open(model_tar) as tar:
+        tar.extractall(path=args.model_path)
+
+    booster = xgb.Booster()
+    booster.load_model(os.path.join(args.model_path, "xgboost-model"))
+    logger.info("XGBoost model loaded successfully")
 
     # --------------------
     # Load test data
     # --------------------
     test_file = os.path.join(args.test_path, "test.csv")
-    if not os.path.exists(test_file):
-        raise FileNotFoundError(f"Test file not found: {test_file}")
-
     df_test = pd.read_csv(test_file)
-    logger.info(f"Test data shape: {df_test.shape}")
 
-    if "Transported" not in df_test.columns:
-        raise ValueError("Target column 'Transported' not found in test data")
-
+    y_true = df_test["Transported"].astype(int)
     X_test = df_test.drop(columns=["Transported"])
-    y_true = df_test["Transported"]
+
+    dtest = xgb.DMatrix(X_test)
 
     # --------------------
     # Prediction
     # --------------------
-    y_pred = model.predict(X_test)
-
-    # LightGBM の predict は確率を返す場合がある
-    if y_pred.dtype != int and y_pred.max() <= 1.0:
-        y_pred = (y_pred >= 0.5).astype(int)
+    y_prob = booster.predict(dtest)
+    y_pred = (y_prob >= 0.5).astype(int)
 
     # --------------------
     # Accuracy

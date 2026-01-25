@@ -39,7 +39,7 @@ def get_pipeline(
     sagemaker_project_name=None,
     role=None,
     default_bucket=None,
-    model_package_group_name="TransportedLightGBM",
+    model_package_group_name="TransportedXGBoost",
     pipeline_name="TransportedPipeline",
     base_job_prefix="transported",
     processing_instance_type="ml.m5.xlarge",
@@ -106,9 +106,9 @@ def get_pipeline(
 
     # -------- Train (LightGBM) --------
     image_uri = sagemaker.image_uris.retrieve(
-        framework="lightgbm",
+        framework="xgboost",
         region=region,
-        version="3.3-2",
+        version="1.5-1",
         py_version="py3",
         instance_type=training_instance_type,
     )
@@ -123,15 +123,17 @@ def get_pipeline(
     )
 
     estimator.set_hyperparameters(
-        objective="binary",
-        metric="binary_error",
-        num_leaves=31,
-        learning_rate=0.05,
-        n_estimators=200,
+        objective="binary:logistic",
+        eval_metric="error",  # = 1 - Accuracy
+        num_round=300,
+        max_depth=6,
+        eta=0.1,
+        subsample=0.8,
+        colsample_bytree=0.8,
     )
 
     step_train = TrainingStep(
-        name="TrainLightGBM",
+        name="TrainXGBoost",
         estimator=estimator,
         inputs={
             "train": TrainingInput(
@@ -145,7 +147,12 @@ def get_pipeline(
 
     # -------- Evaluate --------
     evaluator = ScriptProcessor(
-        image_uri=image_uri,
+        image_uri=sagemaker.image_uris.retrieve(
+            framework="sklearn",
+            region=region,
+            version="1.0-1",
+            instance_type=processing_instance_type,
+        ),
         command=["python3"],
         instance_type=processing_instance_type,
         instance_count=1,
@@ -189,7 +196,9 @@ def get_pipeline(
 
     model_metrics = ModelMetrics(
         model_statistics=MetricsSource(
-            s3_uri=f"{step_eval.arguments['ProcessingOutputConfig']['Outputs'][0]['S3Output']['S3Uri']}/evaluation.json",
+            s3_uri=step_eval.properties.ProcessingOutputConfig.Outputs[
+                "evaluation"
+            ].S3Output.S3Uri + "/evaluation.json",
             content_type="application/json",
         )
     )
