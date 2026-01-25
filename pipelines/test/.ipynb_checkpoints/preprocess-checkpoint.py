@@ -100,10 +100,7 @@ def feature_engineering(df):
 
 def main():
     input_dir = "/opt/ml/processing/input"
-    files = os.listdir(input_dir)
-    if len(files) == 0:
-        raise RuntimeError("No input files found")
-    input_file = os.path.join(input_dir, files[0])
+    input_file = os.path.join(input_dir, "inputdata.csv")
     df = pd.read_csv(input_file)
     logger.info(f"Loaded input file: {input_file}")
     logger.info(f"Input shape: {df.shape}")
