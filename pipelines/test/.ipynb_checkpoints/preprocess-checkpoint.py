@@ -125,12 +125,11 @@ def main():
     test_path = os.path.join(output_base, "test", "test.csv")
 
     logger.info("Saving processed datasets")
-    to_xgb_csv(df_train, "Transported", "/opt/ml/processing/train/train.csv")
-    to_xgb_csv(df_val, "Transported", "/opt/ml/processing/validation/validation.csv")
-    to_xgb_csv(df_test, "Transported", "/opt/ml/processing/test/test.csv")
+    to_xgb_csv(train, "Transported", train_path)
+    to_xgb_csv(validation, "Transported", val_path)
+    to_xgb_csv(test, "Transported", test_path)
 
     logger.info("Preprocessing completed successfully")
-
 
 if __name__ == "__main__":
     main()
