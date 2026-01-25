@@ -207,6 +207,8 @@ def get_pipeline(
         name="RegisterModel",
         step_args=model.register(
             model_package_group_name=model_package_group_name,
+            content_types=["text/csv"],
+            response_types=["text/csv"],
             approval_status=model_approval_status,
             model_metrics=model_metrics,
             inference_instances=["ml.m5.large"],
