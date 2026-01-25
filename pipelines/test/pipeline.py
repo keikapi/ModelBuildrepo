@@ -58,7 +58,7 @@ def get_pipeline(
     # -------- Parameters --------
     input_data = ParameterString(
         name="InputDataUrl",
-        default_value="s3://choitore-data/inputdata/inputdata.csv",
+        default_value="s3://sagemaker-project-p-mbjujshffkps/inputdata/inputdata.csv",
     )
 
     accuracy_threshold = ParameterFloat(
